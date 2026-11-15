@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>设备测量数据分布汇总</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>设备测量数据分布汇总</h1>
+    <span class="subtitle">固定边界直方图 · type-7 分位数 · 修订可撤回 · 版本不可变</span>
+    <span class="spacer"></span>
+    <button class="ghost" id="theme-toggle" type="button">切换深色</button>
+  </header>
+
+  <main>
+    <!-- 过滤器：单行，作用于其下所有内容 -->
+    <section class="filter-row card" aria-label="过滤器">
+      <label>汇总版本
+        <select id="filter-version"></select>
+      </label>
+      <label>设备组
+        <select id="filter-group"><option value="">全部设备组</option></select>
+      </label>
+      <label>时间粒度
+        <select id="filter-granularity">
+          <option value="all">全部时段</option>
+          <option value="day">按天</option>
+          <option value="week">按 ISO 周</option>
+          <option value="month">按月</option>
+        </select>
+      </label>
+      <label>周期
+        <select id="filter-period"><option value="">全部周期</option></select>
+      </label>
+      <button class="ghost" id="btn-recompute" type="button">全量重算比对</button>
+      <button class="ghost" id="btn-verify" type="button">校验当前版本</button>
+      <button class="ghost" id="btn-compare" type="button">比较版本…</button>
+    </section>
+
+    <div id="recompute-banner"></div>
+
+    <!-- 修订操作 -->
+    <section class="card" aria-label="修订操作">
+      <h2>修订原始记录 <span class="hint">新增 / 更正 / 撤销均生成不可变的新汇总版本；原因必填</span></h2>
+      <div class="form-grid">
+        <div class="field">
+          <label for="f-group">设备组</label>
+          <input id="f-group" list="group-options" placeholder="如：光谱仪-A">
+          <datalist id="group-options"></datalist>
+        </div>
+        <div class="field">
+          <label for="f-value">测量值（有限实数）</label>
+          <input id="f-value" type="text" inputmode="decimal" placeholder="如：42.5">
+        </div>
+        <div class="field">
+          <label for="f-time">测量时间（ISO8601）</label>
+          <input id="f-time" type="text" placeholder="2026-11-11T10:00:00Z">
+        </div>
+        <div class="field wide">
+          <label for="f-reason">修订原因</label>
+          <input id="f-reason" type="text" placeholder="如：首次录入 / 校准偏移更正 / 探头未标定撤销">
+        </div>
+        <div class="field wide checkbox-field">
+          <input id="f-fail" type="checkbox">
+          <label for="f-fail">故障注入：提交前主动失败（验证写入失败不发布半份汇总）</label>
+        </div>
+        <div class="field wide row-actions">
+          <button class="primary" id="btn-insert" type="button">新增记录</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 汇总展示 -->
+    <section class="card" aria-label="分布汇总">
+      <h2>分布汇总
+        <span class="hint" id="scheme-hint"></span>
+      </h2>
+      <div id="quantile-note"></div>
+      <div id="tiles" class="tiles"></div>
+      <div class="chart-wrap" id="chart-container"></div>
+      <p class="muted" style="font-size:12px;margin-top:8px">
+        点击柱子查看该桶内的原始记录；橙色柱为桶外值（单独计数，不并入任何桶）。
+        键盘 Tab 到柱子后回车同样可查看。
+      </p>
+      <div class="table-wrap" style="margin-top:16px">
+        <table id="bin-table">
+          <thead>
+            <tr>
+              <th>桶 / 桶外区间</th>
+              <th class="num">计数</th>
+              <th class="num">占比</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 原始记录 -->
+    <section class="card" aria-label="原始记录">
+      <h2>原始记录与修订链 <span class="hint" id="record-count-hint"></span></h2>
+      <div class="table-wrap">
+        <table id="records-table">
+          <thead>
+            <tr>
+              <th class="num">#</th>
+              <th>设备组</th>
+              <th class="num">测量值</th>
+              <th>测量时间</th>
+              <th>状态</th>
+              <th>备注</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 版本历史 -->
+    <section class="card" aria-label="汇总版本">
+      <h2>汇总版本历史 <span class="hint">版本只增不改；每行可查看详情或与其他版本比较</span></h2>
+      <div class="table-wrap">
+        <table id="versions-table">
+          <thead>
+            <tr>
+              <th class="num">版本</th>
+              <th>触发事件</th>
+              <th class="num">有效记录数</th>
+              <th>创建时间 (UTC)</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- 抽屉：桶内记录 / 版本比较 -->
+  <div class="drawer-backdrop" id="drawer-backdrop"></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="详情抽屉">
+    <div class="close-row">
+      <h3 id="drawer-title">详情</h3>
+      <button class="ghost" id="drawer-close" type="button">关闭</button>
+    </div>
+    <div id="drawer-body"></div>
+  </aside>
+
+  <div id="tooltip" role="status"></div>
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
